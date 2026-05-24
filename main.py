@@ -1,30 +1,25 @@
 import time
 import sys
 sys.path.append('/home/amit/NepalShield')
-from crawler.paste_monitor import monitor_pastebin
+from crawler.paste_monitor import run_full_scan
 from alerts.email_alert import send_alert
 from database.models import Session, Breach
-from detection.keyword_filter import make_hash
 from colorama import Fore, Style, init
 
 init(autoreset=True)
 
 def save_threat(threat):
-    """Save detected threat to database"""
     session = Session()
     try:
-        # Check if already exists
         existing = session.query(Breach).filter_by(
             hash_id=threat["hash_id"]
         ).first()
-
         if existing:
-            print(Fore.YELLOW + f"  ⚠️  Already logged: {threat['source']}")
-            return
-
+            print(Fore.YELLOW + f"  Already logged: {threat['source']}")
+            return False
         breach = Breach(
             source       = threat["source"],
-            email        = ', '.join(threat["emails"]),
+            email        = ', '.join(threat["emails"]) if threat["emails"] else "Unknown",
             domain       = "gov.np",
             data_found   = threat["raw_text"],
             threat_score = threat["score"],
@@ -33,21 +28,22 @@ def save_threat(threat):
         )
         session.add(breach)
         session.commit()
-        print(Fore.GREEN + f"  ✅ Saved to database!")
-
+        print(Fore.GREEN + f"  Saved to database!")
+        return True
     except Exception as e:
-        print(Fore.RED + f"  ❌ DB Error: {e}")
+        print(Fore.RED + f"  DB Error: {e}")
         session.rollback()
+        return False
     finally:
         session.close()
 
 def run_monitor():
     print(Fore.CYAN + """
-╔══════════════════════════════════════╗
-║   🇳🇵  NepalShield v1.0             ║
-║   Government Breach Monitor          ║
-║   Built for Nepal Cybersecurity      ║
-╚══════════════════════════════════════╝
+╔══════════════════════════════════════════╗
+║   NEPALSHIELD v2.0                      ║
+║   Government Breach Monitor              ║
+║   Nepal Cybersecurity System             ║
+╚══════════════════════════════════════════╝
     """)
 
     scan_count = 0
@@ -55,26 +51,32 @@ def run_monitor():
     while True:
         scan_count += 1
         print(Fore.CYAN + f"\n{'='*45}")
-        print(Fore.CYAN + f"  🔍 Scan #{scan_count} started...")
+        print(Fore.CYAN + f"  SCAN #{scan_count} STARTED")
         print(Fore.CYAN + f"{'='*45}")
 
-        # Run paste monitor
-        threats = monitor_pastebin()
+        threats = run_full_scan()
 
-        if threats:
-            print(Fore.RED + f"\n🚨 {len(threats)} threat(s) found!")
-            for threat in threats:
-                save_threat(threat)
-                send_alert(threat, "NTA")
+        new_threats = 0
+        for threat in threats:
+            saved = save_threat(threat)
+            if saved:
+                new_threats += 1
+                try:
+                    send_alert(threat, "NTA")
+                except Exception as e:
+                    print(Fore.YELLOW + f"  Alert error: {e}")
+
+        if new_threats > 0:
+            print(Fore.RED + f"\n{new_threats} NEW threat(s) saved and alerted!")
         else:
-            print(Fore.GREEN + "\n✅ No threats found this scan.")
+            print(Fore.GREEN + f"\nNo new threats this scan.")
 
-        print(Fore.YELLOW + f"\n⏳ Next scan in 60 seconds...")
-        print(Fore.YELLOW + f"   Press Ctrl+C to stop.\n")
+        print(Fore.YELLOW + f"\nNext scan in 60 seconds...")
+        print(Fore.YELLOW + f"Press Ctrl+C to stop.\n")
         time.sleep(60)
 
 if __name__ == "__main__":
     try:
         run_monitor()
     except KeyboardInterrupt:
-        print(Fore.CYAN + "\n\n👋 NepalShield stopped. Stay safe!")
+        print(Fore.CYAN + "\n\nNepalShield stopped. Stay safe!")
