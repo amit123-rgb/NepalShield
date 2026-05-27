@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
+from functools import wraps
 import sys
 sys.path.append('/home/amit/NepalShield')
 from database.models import Session, Breach
@@ -15,6 +16,25 @@ ids_system = IntrusionDetector()
 waf_system = WebApplicationFirewall()
 hp_system  = Honeypot()
 
+VALID_TOKENS = {
+    "admin-nepal-2026":  {"username": "admin",  "role": "admin"},
+    "viewer-nepal-2026": {"username": "viewer", "role": "viewer"},
+}
+
+CREDENTIALS = {
+    "admin":  "NepalShield@2026",
+    "viewer": "viewer@2026",
+}
+
+def require_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get("X-Auth-Token", "")
+        if token not in VALID_TOKENS:
+            return jsonify({"error": "Unauthorized"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
 @app.route("/")
 def home():
     return jsonify({
@@ -22,6 +42,29 @@ def home():
         "version": "2.0",
         "status":  "active"
     })
+
+@app.route("/auth/login", methods=["POST"])
+def login():
+    data     = request.json
+    username = data.get("username", "")
+    password = data.get("password", "")
+    if username in CREDENTIALS and CREDENTIALS[username] == password:
+        token = f"{username}-nepal-2026"
+        return jsonify({
+            "success":  True,
+            "token":    token,
+            "username": username,
+            "role":     "admin" if username == "admin" else "viewer",
+            "message":  "Login successful"
+        })
+    return jsonify({"success": False, "message": "Invalid credentials"}), 401
+
+@app.route("/auth/verify", methods=["GET"])
+def verify():
+    token = request.headers.get("X-Auth-Token", "")
+    if token in VALID_TOKENS:
+        return jsonify({"valid": True, "user": VALID_TOKENS[token]})
+    return jsonify({"valid": False}), 401
 
 @app.route("/breaches", methods=["GET"])
 def get_breaches():
@@ -96,12 +139,12 @@ def get_ids_status():
 
 @app.route("/security/waf/test", methods=["POST"])
 def test_waf():
-    data        = request.json
-    ip          = data.get("ip", "unknown")
-    method      = data.get("method", "GET")
-    path        = data.get("path", "/")
-    params      = data.get("params", "")
-    body        = data.get("body", "")
+    data   = request.json
+    ip     = data.get("ip", "unknown")
+    method = data.get("method", "GET")
+    path   = data.get("path", "/")
+    params = data.get("params", "")
+    body   = data.get("body", "")
     allowed, attack_type, detail = waf_system.analyze_request(
         ip, method, path, params, body
     )
